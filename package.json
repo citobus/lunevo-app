@@ -1,0 +1,23 @@
+{
+  "name": "lunevo-backend",
+  "version": "1.0.0",
+  "description": "Backend API for lunevo — Express + Firebase Auth + MongoDB + Claude",
+  "main": "index.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.78.0",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "firebase-admin": "^13.7.0",
+    "mongodb": "^7.1.0"
+  }
+}
