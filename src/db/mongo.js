@@ -29,7 +29,7 @@ async function ensureIndexes(database) {
     // This prevents duplicate check-ins when the iOS app retries upserts.
     await database.collection('checkins').createIndex(
       { uid: 1, clientId: 1 },
-      { unique: true, name: 'uid_clientId_unique', partialFilterExpression: { clientId: { $ne: null } } }
+      { unique: true, name: 'uid_clientId_unique', partialFilterExpression: { clientId: { $exists: true, $type: 'string' } } }
     );
 
     // Fast lookup for fetching a user's check-ins sorted by time.
