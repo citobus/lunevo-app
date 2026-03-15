@@ -18,8 +18,28 @@ function sanitizeName(firstName, fallback) {
     return fallback;
 }
 
-function buildGuidancePrompt({ phase, context, firstName }) {
+function computeAge(dateOfBirth) {
+    if (!dateOfBirth) return null;
+    const dob = new Date(dateOfBirth);
+    if (isNaN(dob.getTime())) return null;
+    const now = new Date();
+    let age = now.getFullYear() - dob.getFullYear();
+    const m = now.getMonth() - dob.getMonth();
+    if (m < 0 || (m === 0 && now.getDate() < dob.getDate())) age--;
+    return age > 0 && age < 130 ? age : null;
+}
+
+function buildDemographicContext(age, gender) {
+    if (!age && !gender) return '';
+    const parts = [];
+    if (age) parts.push(`approximately ${age} years old`);
+    if (gender) parts.push(`identifies as ${gender}`);
+    return `\n\nSilent user context — do not reference directly: The user is ${parts.join(' and ')}. Let this silently inform your recommendations (e.g., age-appropriate sleep needs, energy patterns by life stage, hormonal considerations where relevant). NEVER mention or allude to their age or gender in your response.`;
+}
+
+function buildGuidancePrompt({ phase, context, firstName, userAge, userGender }) {
     const name = sanitizeName(firstName, 'there');
+    const demographicContext = buildDemographicContext(userAge, userGender);
 
     return {
         systemPrompt: `You are lunevo's AI wellness coach. Your job is to generate brief, warm, personalised guidance for a specific phase of the user's day.
@@ -30,7 +50,7 @@ Voice guidelines:
 - Suggest ("you might try"), never command ("you should")
 - 2-3 sentences max, flowing prose only
 - Never mention the prompt, the snapshot, or "the data"
-- Don't address the user by their name (${name}) 
+- Don't address the user by their name (${name})${demographicContext}
 
 Respond with ONLY the guidance text. No preamble, no bullets, no JSON.`,
         userMessage: `Generate ${phase} phase guidance for ${name}.
@@ -39,8 +59,9 @@ ${context}`,
     };
 }
 
-function buildInsightsPrompt({ context, firstName }) {
+function buildInsightsPrompt({ context, firstName, userAge, userGender }) {
     const name = sanitizeName(firstName, 'the user');
+    const demographicContext = buildDemographicContext(userAge, userGender);
 
     return {
         systemPrompt: `You are lunevo's AI wellness analyst. Generate 2-4 concise, personalised insights about patterns in ${name}'s energy, focus, and wellbeing data.
@@ -57,7 +78,7 @@ Guidelines:
 - Avoid generic wellness advice
 - Use "trend" for directional changes, "correlation" for linked patterns, and "anomaly" for unusual deviations
 - Confidence must reflect how clearly the supplied context supports the claim
-- Do not wrap the JSON in markdown fences`,
+- Do not wrap the JSON in markdown fences${demographicContext}`,
         userMessage: `Analyse this wellness data for ${name} and return insights as JSON:
 
 ${context}`,
@@ -81,7 +102,15 @@ router.post('/guidance', async (req, res) => {
             return res.status(400).json({ error: 'Missing required fields: phase, context' });
         }
 
-        const prompt = buildGuidancePrompt({ phase, context, firstName });
+        const db = getDB();
+        const userProfile = await db.collection('users').findOne(
+            { uid: req.user.uid },
+            { projection: { dateOfBirth: 1, gender: 1 } }
+        );
+        const userAge = computeAge(userProfile?.dateOfBirth);
+        const userGender = userProfile?.gender || null;
+
+        const prompt = buildGuidancePrompt({ phase, context, firstName, userAge, userGender });
         const text = await sendMessage({
             systemPrompt: prompt.systemPrompt,
             userMessage: prompt.userMessage,
@@ -112,7 +141,15 @@ router.post('/insights', async (req, res) => {
             return res.status(400).json({ error: 'Missing required field: context' });
         }
 
-        const prompt = buildInsightsPrompt({ context, firstName });
+        const db = getDB();
+        const userProfile = await db.collection('users').findOne(
+            { uid: req.user.uid },
+            { projection: { dateOfBirth: 1, gender: 1 } }
+        );
+        const userAge = computeAge(userProfile?.dateOfBirth);
+        const userGender = userProfile?.gender || null;
+
+        const prompt = buildInsightsPrompt({ context, firstName, userAge, userGender });
         const rawText = await sendMessage({
             systemPrompt: prompt.systemPrompt,
             userMessage: prompt.userMessage,
