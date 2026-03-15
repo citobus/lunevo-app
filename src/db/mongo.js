@@ -44,6 +44,18 @@ async function ensureIndexes(database) {
       { unique: true, name: 'uid_unique' }
     );
 
+    // Broadcast messages: fast lookup by status + scheduledAt for active-message queries.
+    await database.collection('broadcast_messages').createIndex(
+      { status: 1, scheduledAt: 1 },
+      { name: 'status_scheduledAt' }
+    );
+
+    // Message reads: fast lookup to check which messages a user has dismissed.
+    await database.collection('message_reads').createIndex(
+      { uid: 1, messageId: 1 },
+      { unique: true, name: 'uid_messageId_unique' }
+    );
+
     console.log('MongoDB indexes ensured');
   } catch (err) {
     console.error('Failed to ensure indexes (non-fatal):', err.message);

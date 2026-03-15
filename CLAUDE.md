@@ -1,8 +1,8 @@
-# lunevo-backend — AI Agent Context
+# lunevo-backend — Claude Code Context
 
 > **IMPORTANT FOR AI AGENTS:** After any meaningful change here (new route, schema change, new env var, deployment update, dependency change), you MUST update:
-> 1. This file (`lunevo-backend/AGENTS.md`)
-> 2. `lunevo-backend/CLAUDE.md` — the parallel Claude Code context file in this directory
+> 1. This file (`lunevo-backend/CLAUDE.md`)
+> 2. `lunevo-backend/AGENTS.md` — the parallel AI agent context file in this directory
 > 3. `../LUNEVO_PROJECT.md` → Sections 4 (Backend API), 7 (Railway Setup), and/or 9 (Env Vars)
 
 Full project context: **[../LUNEVO_PROJECT.md](../LUNEVO_PROJECT.md)**
@@ -81,11 +81,7 @@ See `.env.example` for format. Never commit `.env`.
 
 ## AI Demographic Context
 
-`src/routes/ai.js` looks up the user's `dateOfBirth` and `gender` from the `users` collection on every `/ai/guidance` and `/ai/insights` request. Age is computed from DOB at request time and appended as a **silent** system-prompt instruction — Claude uses it to tailor recommendations but NEVER mentions age or gender in its output. No new fields are required in the iOS request body.
-
-## Known Deployment Note
-
-The first Railway deploy after adding DOB/gender prompt personalization crashed at startup because `src/routes/ai.js` redeclared `const db` inside both AI handlers. The local hotfix keeps a single `db` variable per request handler; redeploy and re-check `GET /health` plus Railway logs after shipping.
+`src/routes/ai.js` looks up the user's `dateOfBirth` and `gender` from `users` collection on every `/ai/guidance` and `/ai/insights` request. It computes current age from DOB and appends a **silent** system-prompt instruction telling Claude to factor in age and gender when making recommendations — without ever mentioning them in the response. No new fields are required in the iOS request body.
 
 ## Railway Deployment
 
