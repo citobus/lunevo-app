@@ -117,7 +117,6 @@ router.post('/guidance', async (req, res) => {
             model: DEFAULT_GUIDANCE_MODEL,
         });
 
-        const db = getDB();
         await db.collection('ai_guidance').insertOne({
             uid: req.user.uid,
             phase,
@@ -159,7 +158,6 @@ router.post('/insights', async (req, res) => {
         });
         const insights = extractJSONArray(rawText);
 
-        const db = getDB();
         await db.collection('ai_insights').insertOne({
             uid: req.user.uid,
             insights,
