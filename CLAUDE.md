@@ -35,6 +35,12 @@ index.js  →  connectDB() (MongoDB)  →  app.listen()
 | PATCH | `/users/me` | Yes | Update profile |
 | POST | `/ai/guidance` | Yes | Claude guidance for a phase |
 | POST | `/ai/insights` | Yes | Claude weekly insights |
+| GET | `/messages` | Yes | Fetch unread active broadcast messages for user |
+| POST | `/messages/:id/dismiss` | Yes | Mark broadcast message dismissed (per-user, idempotent) |
+| GET | `/admin/messages` | Admin | List all broadcast messages |
+| POST | `/admin/messages` | Admin | Create broadcast message (`title`, `body`, optional `scheduledAt`) |
+| PATCH | `/admin/messages/:id` | Admin | Update title/body/scheduledAt/status |
+| DELETE | `/admin/messages/:id` | Admin | Permanently delete message + dismiss records |
 
 ## Auth Pattern
 
@@ -44,18 +50,25 @@ Every protected route uses `src/middleware/auth.js`:
 - Attaches `req.user` (`{ uid, email, name }`)
 - All DB queries must be scoped by `req.user.uid`
 
+Admin routes additionally use `src/middleware/adminAuth.js`:
+- Same token verification, then checks decoded email against `ADMIN_EMAILS` env var (comma-separated)
+- Returns 403 if email not in list
+
 ## Key Files
 
 ```
-index.js                    ← start server
-src/app.js                  ← Express setup + route mounting
-src/middleware/auth.js      ← Firebase token verification
-src/routes/checkins.js      ← check-in CRUD + bulk sync
-src/routes/users.js         ← user profile
-src/routes/ai.js            ← Claude guidance + insights
-src/services/firebase.js    ← Firebase Admin SDK init
-src/services/anthropic.js   ← Claude API wrapper
-src/db/mongo.js             ← MongoDB connection + index creation
+index.js                       ← start server
+src/app.js                     ← Express setup + route mounting + CORS for lunevoapp.com
+src/middleware/auth.js         ← Firebase token verification
+src/middleware/adminAuth.js    ← Admin email allowlist check
+src/routes/checkins.js         ← check-in CRUD + bulk sync
+src/routes/users.js            ← user profile
+src/routes/ai.js               ← Claude guidance + insights
+src/routes/messages.js         ← broadcast messages (user-facing)
+src/routes/admin/messages.js   ← broadcast messages CRUD (admin only)
+src/services/firebase.js       ← Firebase Admin SDK init
+src/services/anthropic.js      ← Claude API wrapper
+src/db/mongo.js                ← MongoDB connection + index creation
 ```
 
 ## Environment Variables
@@ -70,14 +83,17 @@ src/db/mongo.js             ← MongoDB connection + index creation
 | `ANTHROPIC_API_KEY` | Yes | `sk-ant-...` |
 | `DEFAULT_CLAUDE_MODEL` | No | Default: `claude-haiku-4-5-20251001` |
 | `INSIGHT_CLAUDE_MODEL` | No | Default: `claude-haiku-4-5-20251001` (NOT Sonnet — both endpoints default to Haiku) |
+| `ADMIN_EMAILS` | Yes (for admin portal) | Comma-separated Google account emails with admin access |
 
 See `.env.example` for format. Never commit `.env`.
 
 ## MongoDB Collections
 
 - `checkins` — indexed on `(uid, clientId)` unique + `(uid, timestamp)`
-- `users` — indexed on `uid` unique; now stores `dateOfBirth` (ISO date) and `gender` ("male" | "female" | "other") when provided by the iOS app
-- `ai_guidance`, `ai_insights` — reserved, not yet actively used
+- `users` — indexed on `uid` unique; stores `dateOfBirth` (ISO date) and `gender` ("male" | "female" | "other")
+- `broadcast_messages` — `{ title, body, status, scheduledAt, publishedAt, createdAt, updatedAt, createdBy }`; indexed on `(status, scheduledAt)`
+- `message_reads` — `{ uid, messageId, dismissedAt }`; indexed on `(uid, messageId)` unique — tracks per-user dismissals
+- `ai_guidance`, `ai_insights` — logging only
 
 ## AI Demographic Context
 
