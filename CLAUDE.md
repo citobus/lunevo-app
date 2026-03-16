@@ -33,8 +33,8 @@ index.js  →  connectDB() (MongoDB)  →  app.listen()  →  startScheduler()
 | DELETE | `/checkins/by-client-id/:clientId` | Yes | Delete by UUID |
 | GET | `/users/me` | Yes | Fetch or auto-create profile |
 | PATCH | `/users/me` | Yes | Update profile |
-| POST | `/ai/guidance` | Yes | Claude guidance for a phase |
-| POST | `/ai/insights` | Yes | Claude weekly insights |
+| POST | `/ai/guidance` | Yes | Claude guidance for a phase (rate-limited) |
+| POST | `/ai/insights` | Yes | Claude weekly insights (rate-limited) |
 | GET | `/messages` | Yes | Fetch unread active broadcast messages for user |
 | POST | `/messages/:id/dismiss` | Yes | Mark broadcast message dismissed (per-user, idempotent) |
 | PUT | `/devices/token` | Yes | Register/update FCM device token |
@@ -66,6 +66,7 @@ index.js                            ← start server + scheduler
 src/app.js                          ← Express setup + route mounting + CORS for lunevoapp.com
 src/middleware/auth.js              ← Firebase token verification
 src/middleware/adminAuth.js         ← Admin email allowlist check
+src/middleware/rateLimit.js         ← Per-user sliding window rate limiter (in-memory)
 src/routes/checkins.js              ← check-in CRUD + bulk sync
 src/routes/users.js                 ← user profile
 src/routes/ai.js                    ← Claude guidance + insights (triggers insight notifications)
@@ -93,6 +94,8 @@ src/db/mongo.js                     ← MongoDB connection + index creation
 | `DEFAULT_CLAUDE_MODEL` | No | Default: `claude-haiku-4-5-20251001` |
 | `INSIGHT_CLAUDE_MODEL` | No | Default: `claude-haiku-4-5-20251001` (NOT Sonnet — both endpoints default to Haiku) |
 | `ADMIN_EMAILS` | Yes (for admin portal) | Comma-separated Google account emails with admin access |
+| `AI_GUIDANCE_RATE_LIMIT` | No | Max guidance requests per user per hour (default: 30) |
+| `AI_INSIGHTS_RATE_LIMIT` | No | Max insights requests per user per hour (default: 10) |
 
 See `.env.example` for format. Never commit `.env`.
 

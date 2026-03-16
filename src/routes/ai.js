@@ -1,5 +1,6 @@
 const express = require('express');
 const { requireAuth } = require('../middleware/auth');
+const { rateLimit } = require('../middleware/rateLimit');
 const { sendMessage } = require('../services/anthropic');
 const { getDB } = require('../db/mongo');
 const { sendToUser, logNotification } = require('../services/fcm');
@@ -8,6 +9,13 @@ const router = express.Router();
 
 const DEFAULT_GUIDANCE_MODEL = process.env.DEFAULT_CLAUDE_MODEL || 'claude-haiku-4-5-20251001';
 const DEFAULT_INSIGHT_MODEL = process.env.INSIGHT_CLAUDE_MODEL || 'claude-haiku-4-5-20251001';
+
+// ─── Rate Limits (per user, sliding window) ─────────────────────────────────
+const GUIDANCE_RATE_LIMIT = parseInt(process.env.AI_GUIDANCE_RATE_LIMIT, 10) || 30;   // per hour
+const INSIGHTS_RATE_LIMIT = parseInt(process.env.AI_INSIGHTS_RATE_LIMIT, 10) || 10;   // per hour
+
+const guidanceLimit = rateLimit({ windowMs: 3_600_000, max: GUIDANCE_RATE_LIMIT, key: 'ai:guidance' });
+const insightsLimit = rateLimit({ windowMs: 3_600_000, max: INSIGHTS_RATE_LIMIT, key: 'ai:insights' });
 
 router.use(requireAuth);
 
@@ -95,7 +103,7 @@ function extractJSONArray(rawText) {
     return JSON.parse(jsonMatch[0]);
 }
 
-router.post('/guidance', async (req, res) => {
+router.post('/guidance', guidanceLimit, async (req, res) => {
     try {
         const { phase, context, firstName } = req.body;
 
@@ -133,7 +141,7 @@ router.post('/guidance', async (req, res) => {
     }
 });
 
-router.post('/insights', async (req, res) => {
+router.post('/insights', insightsLimit, async (req, res) => {
     try {
         const { context, firstName } = req.body;
 
