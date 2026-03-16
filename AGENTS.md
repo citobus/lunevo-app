@@ -19,7 +19,7 @@ Node.js + Express 5 REST API. Acts as the secure proxy between the iOS app and A
 ## Entry Point & Startup
 
 ```
-index.js  →  connectDB() (MongoDB)  →  app.listen()
+index.js  →  connectDB() (MongoDB)  →  app.listen()  →  startScheduler()
 ```
 
 ## Routes
@@ -34,7 +34,18 @@ index.js  →  connectDB() (MongoDB)  →  app.listen()
 | GET | `/users/me` | Yes | Fetch or auto-create profile |
 | PATCH | `/users/me` | Yes | Update profile |
 | POST | `/ai/guidance` | Yes | Claude guidance for a phase |
-| POST | `/ai/insights` | Yes | Claude weekly insights |
+| POST | `/ai/insights` | Yes | Claude weekly insights (triggers push notification) |
+| GET | `/messages` | Yes | Fetch unread active broadcast messages for user |
+| POST | `/messages/:id/dismiss` | Yes | Mark broadcast message dismissed |
+| PUT | `/devices/token` | Yes | Register/update FCM device token |
+| DELETE | `/devices/token` | Yes | Unregister FCM device token |
+| GET | `/admin/messages` | Admin | List all broadcast messages |
+| POST | `/admin/messages` | Admin | Create broadcast message |
+| PATCH | `/admin/messages/:id` | Admin | Update message |
+| DELETE | `/admin/messages/:id` | Admin | Delete message + dismiss records |
+| POST | `/admin/notifications/send` | Admin | Send push notification to all/targeted users |
+| GET | `/admin/notifications/log` | Admin | Recent notification log entries |
+| GET | `/admin/notifications/stats` | Admin | Device/user notification stats |
 
 ## Auth Pattern
 
@@ -47,15 +58,22 @@ Every protected route uses `src/middleware/auth.js`:
 ## Key Files
 
 ```
-index.js                    ← start server
-src/app.js                  ← Express setup + route mounting
-src/middleware/auth.js      ← Firebase token verification
-src/routes/checkins.js      ← check-in CRUD + bulk sync
-src/routes/users.js         ← user profile
-src/routes/ai.js            ← Claude guidance + insights
-src/services/firebase.js    ← Firebase Admin SDK init
-src/services/anthropic.js   ← Claude API wrapper
-src/db/mongo.js             ← MongoDB connection + index creation
+index.js                            ← start server + scheduler
+src/app.js                          ← Express setup + route mounting + CORS
+src/middleware/auth.js              ← Firebase token verification
+src/middleware/adminAuth.js         ← Admin email allowlist check
+src/routes/checkins.js              ← check-in CRUD + bulk sync
+src/routes/users.js                 ← user profile
+src/routes/ai.js                    ← Claude guidance + insights (triggers insight notifications)
+src/routes/messages.js              ← broadcast messages (user-facing)
+src/routes/devices.js               ← FCM device token registration
+src/routes/admin/messages.js        ← broadcast messages CRUD (admin only)
+src/routes/admin/notifications.js   ← push notification admin endpoints
+src/services/firebase.js            ← Firebase Admin SDK init
+src/services/anthropic.js           ← Claude API wrapper
+src/services/fcm.js                 ← FCM notification sending
+src/services/scheduler.js           ← Cron scheduler for check-in reminders
+src/db/mongo.js                     ← MongoDB connection + index creation
 ```
 
 ## Environment Variables
@@ -70,22 +88,28 @@ src/db/mongo.js             ← MongoDB connection + index creation
 | `ANTHROPIC_API_KEY` | Yes | `sk-ant-...` |
 | `DEFAULT_CLAUDE_MODEL` | No | Default: `claude-haiku-4-5-20251001` |
 | `INSIGHT_CLAUDE_MODEL` | No | Default: `claude-haiku-4-5-20251001` (NOT Sonnet — both endpoints default to Haiku) |
+| `ADMIN_EMAILS` | Yes (for admin portal) | Comma-separated Google account emails with admin access |
 
 See `.env.example` for format. Never commit `.env`.
 
 ## MongoDB Collections
 
 - `checkins` — indexed on `(uid, clientId)` unique + `(uid, timestamp)`
-- `users` — indexed on `uid` unique; now stores `dateOfBirth` (ISO date) and `gender` ("male" | "female" | "other") when provided by the iOS app
-- `ai_guidance`, `ai_insights` — reserved, not yet actively used
+- `users` — indexed on `uid` unique; stores `dateOfBirth`, `gender`, `notificationSettings`
+- `broadcast_messages` — indexed on `(status, scheduledAt)`
+- `message_reads` — indexed on `(uid, messageId)` unique
+- `device_tokens` — indexed on `(uid, fcmToken)` unique + `(uid)` — stores FCM tokens with timezone info
+- `notification_log` — indexed on `(createdAt)` + `(recipientUid, createdAt)` — tracks all sent notifications for analytics and daily cap
+- `ai_guidance`, `ai_insights` — logging only
 
-## AI Demographic Context
+## Push Notifications (FCM)
 
-`src/routes/ai.js` looks up the user's `dateOfBirth` and `gender` from the `users` collection on every `/ai/guidance` and `/ai/insights` request. Age is computed from DOB at request time and appended as a **silent** system-prompt instruction — Claude uses it to tailor recommendations but NEVER mentions age or gender in its output. No new fields are required in the iOS request body.
+Backend sends push notifications via Firebase Cloud Messaging using the existing Firebase Admin SDK.
 
-## Known Deployment Note
-
-The first Railway deploy after adding DOB/gender prompt personalization crashed at startup because `src/routes/ai.js` redeclared `const db` inside both AI handlers. The local hotfix keeps a single `db` variable per request handler; redeploy and re-check `GET /health` plus Railway logs after shipping.
+- **Check-in reminders:** Cron scheduler (every 30 min) evaluates users based on `notificationSettings.checkInReminderFrequency` (often/infrequent/never), timezone, quiet hours (10pm–8am), and daily cap (3/day)
+- **Insight notifications:** Triggered from `/ai/insights` endpoint, respects `insightsFrequency` preference
+- **Admin manual:** `POST /admin/notifications/send` to push to all or targeted users
+- **Device tokens:** Registered via `PUT /devices/token`, unregistered via `DELETE /devices/token`; stale tokens auto-cleaned
 
 ## Railway Deployment
 

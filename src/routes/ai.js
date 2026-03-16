@@ -2,6 +2,7 @@ const express = require('express');
 const { requireAuth } = require('../middleware/auth');
 const { sendMessage } = require('../services/anthropic');
 const { getDB } = require('../db/mongo');
+const { sendToUser, logNotification } = require('../services/fcm');
 
 const router = express.Router();
 
@@ -165,11 +166,59 @@ router.post('/insights', async (req, res) => {
             generatedAt: new Date(),
         });
 
+        // Send push notification for new insights (non-blocking)
+        notifyInsightsAvailable(req.user.uid, db).catch(() => {});
+
         return res.json({ insights, source: 'claude' });
     } catch (err) {
         console.error('POST /ai/insights error:', err);
         return res.status(500).json({ error: err.message || 'Failed to generate insights' });
     }
 });
+
+// ─── Insight Notification ────────────────────────────────────────────────────
+// Sends a push notification when new insights are generated, respecting
+// the user's insightsFrequency preference and rate limiting.
+async function notifyInsightsAvailable(uid, db) {
+    const user = await db.collection('users').findOne(
+        { uid },
+        { projection: { notificationSettings: 1, firstName: 1 } }
+    );
+
+    if (!user?.notificationSettings?.isEnabled) return;
+
+    const freq = user.notificationSettings.insightsFrequency;
+    if (freq === 'never') return;
+
+    // Rate limit for "infrequent": max 1 insight notification per 7 days
+    if (freq === 'infrequent') {
+        const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+        const recentCount = await db.collection('notification_log').countDocuments({
+            type: 'insight_available',
+            recipientUid: uid,
+            createdAt: { $gte: weekAgo },
+        });
+        if (recentCount > 0) return;
+    }
+
+    const result = await sendToUser(uid, {
+        title: 'New insights are ready',
+        body: 'Your latest wellness patterns have been analyzed. Take a look!',
+        data: { type: 'insight_available' },
+    });
+
+    if (result.sent > 0) {
+        await logNotification({
+            type: 'insight_available',
+            title: 'New insights are ready',
+            body: 'Your latest wellness patterns have been analyzed. Take a look!',
+            recipientUid: uid,
+            recipientCount: 1,
+            sentCount: result.sent,
+            failedCount: result.failed,
+            triggeredBy: 'system',
+        });
+    }
+}
 
 module.exports = router;

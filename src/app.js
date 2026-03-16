@@ -5,7 +5,9 @@ const checkinsRouter = require('./routes/checkins');
 const usersRouter = require('./routes/users');
 const aiRouter = require('./routes/ai');
 const messagesRouter = require('./routes/messages');
+const devicesRouter = require('./routes/devices');
 const adminMessagesRouter = require('./routes/admin/messages');
+const adminNotificationsRouter = require('./routes/admin/notifications');
 
 const app = express();
 
@@ -38,7 +40,9 @@ app.use('/checkins', checkinsRouter);
 app.use('/users', usersRouter);
 app.use('/ai', aiRouter);
 app.use('/messages', messagesRouter);
+app.use('/devices', devicesRouter);
 app.use('/admin/messages', adminMessagesRouter);
+app.use('/admin/notifications', adminNotificationsRouter);
 
 // ─── 404 ──────────────────────────────────────────────────────────────────────
 app.use((req, res) => {

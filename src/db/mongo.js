@@ -56,6 +56,30 @@ async function ensureIndexes(database) {
       { unique: true, name: 'uid_messageId_unique' }
     );
 
+    // Device tokens: one entry per (uid, fcmToken) pair.
+    await database.collection('device_tokens').createIndex(
+      { uid: 1, fcmToken: 1 },
+      { unique: true, name: 'uid_fcmToken_unique' }
+    );
+
+    // Device tokens: fast lookup by uid for sending notifications.
+    await database.collection('device_tokens').createIndex(
+      { uid: 1 },
+      { name: 'device_tokens_uid' }
+    );
+
+    // Notification log: recent logs sorted by time.
+    await database.collection('notification_log').createIndex(
+      { createdAt: -1 },
+      { name: 'notification_log_createdAt' }
+    );
+
+    // Notification log: per-user daily cap tracking.
+    await database.collection('notification_log').createIndex(
+      { recipientUid: 1, createdAt: -1 },
+      { name: 'notification_log_uid_createdAt' }
+    );
+
     console.log('MongoDB indexes ensured');
   } catch (err) {
     console.error('Failed to ensure indexes (non-fatal):', err.message);

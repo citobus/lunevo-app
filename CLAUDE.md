@@ -19,7 +19,7 @@ Node.js + Express 5 REST API. Acts as the secure proxy between the iOS app and A
 ## Entry Point & Startup
 
 ```
-index.js  →  connectDB() (MongoDB)  →  app.listen()
+index.js  →  connectDB() (MongoDB)  →  app.listen()  →  startScheduler()
 ```
 
 ## Routes
@@ -37,10 +37,15 @@ index.js  →  connectDB() (MongoDB)  →  app.listen()
 | POST | `/ai/insights` | Yes | Claude weekly insights |
 | GET | `/messages` | Yes | Fetch unread active broadcast messages for user |
 | POST | `/messages/:id/dismiss` | Yes | Mark broadcast message dismissed (per-user, idempotent) |
+| PUT | `/devices/token` | Yes | Register/update FCM device token |
+| DELETE | `/devices/token` | Yes | Unregister FCM device token (e.g. on sign-out) |
 | GET | `/admin/messages` | Admin | List all broadcast messages |
 | POST | `/admin/messages` | Admin | Create broadcast message (`title`, `body`, optional `scheduledAt`) |
 | PATCH | `/admin/messages/:id` | Admin | Update title/body/scheduledAt/status |
 | DELETE | `/admin/messages/:id` | Admin | Permanently delete message + dismiss records |
+| POST | `/admin/notifications/send` | Admin | Send push notification to all (or targeted) users |
+| GET | `/admin/notifications/log` | Admin | Recent notification log entries |
+| GET | `/admin/notifications/stats` | Admin | Device/user notification stats |
 
 ## Auth Pattern
 
@@ -57,18 +62,22 @@ Admin routes additionally use `src/middleware/adminAuth.js`:
 ## Key Files
 
 ```
-index.js                       ← start server
-src/app.js                     ← Express setup + route mounting + CORS for lunevoapp.com
-src/middleware/auth.js         ← Firebase token verification
-src/middleware/adminAuth.js    ← Admin email allowlist check
-src/routes/checkins.js         ← check-in CRUD + bulk sync
-src/routes/users.js            ← user profile
-src/routes/ai.js               ← Claude guidance + insights
-src/routes/messages.js         ← broadcast messages (user-facing)
-src/routes/admin/messages.js   ← broadcast messages CRUD (admin only)
-src/services/firebase.js       ← Firebase Admin SDK init
-src/services/anthropic.js      ← Claude API wrapper
-src/db/mongo.js                ← MongoDB connection + index creation
+index.js                            ← start server + scheduler
+src/app.js                          ← Express setup + route mounting + CORS for lunevoapp.com
+src/middleware/auth.js              ← Firebase token verification
+src/middleware/adminAuth.js         ← Admin email allowlist check
+src/routes/checkins.js              ← check-in CRUD + bulk sync
+src/routes/users.js                 ← user profile
+src/routes/ai.js                    ← Claude guidance + insights (triggers insight notifications)
+src/routes/messages.js              ← broadcast messages (user-facing)
+src/routes/devices.js               ← FCM device token registration
+src/routes/admin/messages.js        ← broadcast messages CRUD (admin only)
+src/routes/admin/notifications.js   ← push notification admin endpoints (send, log, stats)
+src/services/firebase.js            ← Firebase Admin SDK init
+src/services/anthropic.js           ← Claude API wrapper
+src/services/fcm.js                 ← FCM notification sending (batched, stale token cleanup)
+src/services/scheduler.js           ← Cron scheduler for check-in reminders
+src/db/mongo.js                     ← MongoDB connection + index creation
 ```
 
 ## Environment Variables
@@ -93,11 +102,31 @@ See `.env.example` for format. Never commit `.env`.
 - `users` — indexed on `uid` unique; stores `dateOfBirth` (ISO date) and `gender` ("male" | "female" | "other")
 - `broadcast_messages` — `{ title, body, status, scheduledAt, publishedAt, createdAt, updatedAt, createdBy }`; indexed on `(status, scheduledAt)`
 - `message_reads` — `{ uid, messageId, dismissedAt }`; indexed on `(uid, messageId)` unique — tracks per-user dismissals
+- `device_tokens` — `{ uid, fcmToken, platform, timezoneOffset, createdAt, updatedAt }`; indexed on `(uid, fcmToken)` unique + `(uid)`
+- `notification_log` — `{ type, title, body, recipientUid?, recipientCount, sentCount, failedCount, triggeredBy, createdAt }`; indexed on `(createdAt)` + `(recipientUid, createdAt)` for daily cap tracking
 - `ai_guidance`, `ai_insights` — logging only
 
 ## AI Demographic Context
 
 `src/routes/ai.js` looks up the user's `dateOfBirth` and `gender` from `users` collection on every `/ai/guidance` and `/ai/insights` request. It computes current age from DOB and appends a **silent** system-prompt instruction telling Claude to factor in age and gender when making recommendations — without ever mentioning them in the response. No new fields are required in the iOS request body.
+
+## Push Notifications (FCM)
+
+Backend sends push notifications via Firebase Cloud Messaging (FCM) using the existing Firebase Admin SDK — no extra env vars needed.
+
+**Automatic notifications:**
+- **Check-in reminders** — cron scheduler runs every 30 min, evaluates each user's `notificationSettings.checkInReminderFrequency`:
+  - `often`: 2x/day (9am, 6pm user-local time), only if no check-in in 5 hours
+  - `infrequent`: 1x/day (12pm), only if no check-in today
+  - `never`: none
+- **Insight notifications** — triggered from `/ai/insights` after new insights are generated, respects `notificationSettings.insightsFrequency`:
+  - `often`: every time; `infrequent`: max 1/week; `never`: none
+- **Quiet hours:** 10pm–8am user-local time
+- **Daily cap:** Max 3 per user per day across all types
+
+**Manual notifications:** Admin portal `POST /admin/notifications/send` to push to all users.
+
+**Device tokens:** iOS app registers FCM token via `PUT /devices/token` on sign-in and token refresh; unregisters via `DELETE /devices/token` on sign-out. Stale tokens auto-cleaned on send failure.
 
 ## Railway Deployment
 
