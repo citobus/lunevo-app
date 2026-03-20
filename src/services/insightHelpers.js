@@ -43,14 +43,16 @@ Return ONLY a valid JSON array. Each element must have exactly these fields:
 }
 
 What makes a great insight:
-- ACTIONABLE: Tell them what to DO with the pattern ("Your mornings are a strength — schedule deep work before lunch" rather than "Your morning composite is 4.2")
-- CONNECTING: Link patterns to real life ("When you mention exercise, your afternoon focus jumps — that morning run is paying off" rather than "Exercise correlates with +0.8 delta")
+- ACTIONABLE: Tell them what to DO with the pattern ("Your mornings are a strength, schedule deep work before lunch" rather than "Your morning composite is 4.2")
+- CONNECTING: Link patterns to real life ("When you mention exercise, your afternoon focus jumps, that morning run is paying off" rather than "Exercise correlates with +0.8 delta")
 - HUMAN: Write like a thoughtful coach talking to a friend, not a dashboard summarizing metrics
 - SPECIFIC: Reference actual days, phases, or note themes from their data — but translate the numbers into meaning
 
+Number usage rule:
+- AT MOST ONE insight may include a score rating (e.g., "3.8" or "4.1") to ground a specific claim. The rest must convey meaning without any numerical ratings.
+- Never reference internal terms like "composite", "delta", or "/5"
+
 What to avoid:
-- Don't lead with or focus on raw numbers — an occasional reference is fine for context (e.g., "your energy tends to dip in the evenings"), but the insight should be about what it MEANS, not what the score IS
-- Never reference internal terms like "composite", "delta", or "/5 scale"
 - Never say "your data shows" or "based on your check-ins"
 - Never give generic wellness advice that isn't grounded in their specific patterns
 - Don't just describe what happened — interpret it and suggest something useful
