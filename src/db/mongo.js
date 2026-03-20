@@ -80,6 +80,12 @@ async function ensureIndexes(database) {
       { name: 'notification_log_uid_createdAt' }
     );
 
+    // AI insights: fast lookup by user + generation time (for GET /ai/insights + cron dedup).
+    await database.collection('ai_insights').createIndex(
+      { uid: 1, generatedAt: -1 },
+      { name: 'ai_insights_uid_generatedAt' }
+    );
+
     console.log('MongoDB indexes ensured');
   } catch (err) {
     console.error('Failed to ensure indexes (non-fatal):', err.message);

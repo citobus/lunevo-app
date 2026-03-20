@@ -3,7 +3,14 @@ const { requireAuth } = require('../middleware/auth');
 const { rateLimit } = require('../middleware/rateLimit');
 const { sendMessage } = require('../services/anthropic');
 const { getDB } = require('../db/mongo');
-const { sendToUser, logNotification } = require('../services/fcm');
+const {
+  sanitizeName,
+  computeAge,
+  buildDemographicContext,
+  buildInsightsPrompt,
+  extractJSONArray,
+  notifyInsightsAvailable,
+} = require('../services/insightHelpers');
 
 const router = express.Router();
 
@@ -18,33 +25,6 @@ const guidanceLimit = rateLimit({ windowMs: 3_600_000, max: GUIDANCE_RATE_LIMIT,
 const insightsLimit = rateLimit({ windowMs: 3_600_000, max: INSIGHTS_RATE_LIMIT, key: 'ai:insights' });
 
 router.use(requireAuth);
-
-function sanitizeName(firstName, fallback) {
-    if (typeof firstName === 'string' && firstName.trim().length > 0) {
-        return firstName.trim();
-    }
-
-    return fallback;
-}
-
-function computeAge(dateOfBirth) {
-    if (!dateOfBirth) return null;
-    const dob = new Date(dateOfBirth);
-    if (isNaN(dob.getTime())) return null;
-    const now = new Date();
-    let age = now.getFullYear() - dob.getFullYear();
-    const m = now.getMonth() - dob.getMonth();
-    if (m < 0 || (m === 0 && now.getDate() < dob.getDate())) age--;
-    return age > 0 && age < 130 ? age : null;
-}
-
-function buildDemographicContext(age, gender) {
-    if (!age && !gender) return '';
-    const parts = [];
-    if (age) parts.push(`approximately ${age} years old`);
-    if (gender) parts.push(`identifies as ${gender}`);
-    return `\n\nSilent user context — do not reference directly: The user is ${parts.join(' and ')}. Let this silently inform your recommendations (e.g., age-appropriate sleep needs, energy patterns by life stage, hormonal considerations where relevant). NEVER mention or allude to their age or gender in your response.`;
-}
 
 function buildGuidancePrompt({ phase, context, firstName, userAge, userGender }) {
     const name = sanitizeName(firstName, 'there');
@@ -66,41 +46,6 @@ Respond with ONLY the guidance text. No preamble, no bullets, no JSON.`,
 
 ${context}`,
     };
-}
-
-function buildInsightsPrompt({ context, firstName, userAge, userGender }) {
-    const name = sanitizeName(firstName, 'the user');
-    const demographicContext = buildDemographicContext(userAge, userGender);
-
-    return {
-        systemPrompt: `You are lunevo's AI wellness analyst. Generate 2-4 concise, personalised insights about patterns in ${name}'s energy, focus, and wellbeing data.
-
-Return ONLY a valid JSON array. Each element must have exactly these fields:
-{
-  "text": "<insight text, 2-3 sentences>",
-  "patternType": "trend" | "correlation" | "anomaly",
-  "confidence": <number 0.0-1.0>
-}
-
-Guidelines:
-- Be specific and personal; name actual patterns, days, or phases when supported
-- Avoid generic wellness advice
-- Use "trend" for directional changes, "correlation" for linked patterns, and "anomaly" for unusual deviations
-- Confidence must reflect how clearly the supplied context supports the claim
-- Do not wrap the JSON in markdown fences${demographicContext}`,
-        userMessage: `Analyse this wellness data for ${name} and return insights as JSON:
-
-${context}`,
-    };
-}
-
-function extractJSONArray(rawText) {
-    const jsonMatch = rawText.match(/\[[\s\S]*\]/);
-    if (!jsonMatch) {
-        throw new Error('Claude did not return a valid JSON array');
-    }
-
-    return JSON.parse(jsonMatch[0]);
 }
 
 router.post('/guidance', guidanceLimit, async (req, res) => {
@@ -184,49 +129,44 @@ router.post('/insights', insightsLimit, async (req, res) => {
     }
 });
 
-// ─── Insight Notification ────────────────────────────────────────────────────
-// Sends a push notification when new insights are generated, respecting
-// the user's insightsFrequency preference and rate limiting.
-async function notifyInsightsAvailable(uid, db) {
-    const user = await db.collection('users').findOne(
-        { uid },
-        { projection: { notificationSettings: 1, firstName: 1 } }
-    );
+// ─── GET /ai/insights ────────────────────────────────────────────────────────
+// Fetch the user's most recent server-generated insights.
+router.get('/insights', async (req, res) => {
+    try {
+        const db = getDB();
+        const limit = Math.min(parseInt(req.query.limit, 10) || 20, 50);
+        const since = req.query.since ? new Date(req.query.since) : null;
 
-    if (!user?.notificationSettings?.isEnabled) return;
+        const query = { uid: req.user.uid };
+        if (since && !isNaN(since.getTime())) {
+            query.generatedAt = { $gt: since };
+        }
 
-    const freq = user.notificationSettings.insightsFrequency;
-    if (freq === 'never') return;
+        const docs = await db.collection('ai_insights')
+            .find(query)
+            .sort({ generatedAt: -1 })
+            .limit(limit)
+            .toArray();
 
-    // Rate limit for "infrequent": max 1 insight notification per 7 days
-    if (freq === 'infrequent') {
-        const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-        const recentCount = await db.collection('notification_log').countDocuments({
-            type: 'insight_available',
-            recipientUid: uid,
-            createdAt: { $gte: weekAgo },
-        });
-        if (recentCount > 0) return;
+        // Flatten: each doc has an insights[] array — merge them with generatedAt
+        const insights = [];
+        for (const doc of docs) {
+            if (!Array.isArray(doc.insights)) continue;
+            for (const insight of doc.insights) {
+                insights.push({
+                    text: insight.text,
+                    patternType: insight.patternType,
+                    confidence: insight.confidence,
+                    generatedAt: doc.generatedAt,
+                });
+            }
+        }
+
+        return res.json({ insights, source: 'server' });
+    } catch (err) {
+        console.error('GET /ai/insights error:', err);
+        return res.status(500).json({ error: 'Failed to fetch insights' });
     }
-
-    const result = await sendToUser(uid, {
-        title: 'New insights are ready',
-        body: 'Your latest wellness patterns have been analyzed. Take a look!',
-        data: { type: 'insight_available' },
-    });
-
-    if (result.sent > 0) {
-        await logNotification({
-            type: 'insight_available',
-            title: 'New insights are ready',
-            body: 'Your latest wellness patterns have been analyzed. Take a look!',
-            recipientUid: uid,
-            recipientCount: 1,
-            sentCount: result.sent,
-            failedCount: result.failed,
-            triggeredBy: 'system',
-        });
-    }
-}
+});
 
 module.exports = router;

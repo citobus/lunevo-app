@@ -35,6 +35,7 @@ index.js  →  connectDB() (MongoDB)  →  app.listen()  →  startScheduler()
 | PATCH | `/users/me` | Yes | Update profile |
 | POST | `/ai/guidance` | Yes | Claude guidance for a phase (rate-limited) |
 | POST | `/ai/insights` | Yes | Claude weekly insights (rate-limited) |
+| GET | `/ai/insights` | Yes | Fetch server-generated insights (`?limit=N&since=ISO`) |
 | GET | `/messages` | Yes | Fetch unread active broadcast messages for user |
 | POST | `/messages/:id/dismiss` | Yes | Mark broadcast message dismissed (per-user, idempotent) |
 | PUT | `/devices/token` | Yes | Register/update FCM device token |
@@ -77,7 +78,10 @@ src/routes/admin/notifications.js   ← push notification admin endpoints (send,
 src/services/firebase.js            ← Firebase Admin SDK init
 src/services/anthropic.js           ← Claude API wrapper
 src/services/fcm.js                 ← FCM notification sending (batched, stale token cleanup)
-src/services/scheduler.js           ← Cron scheduler for check-in reminders
+src/services/scheduler.js           ← Cron scheduler for check-in reminders + insight generation
+src/services/analyticsEngine.js     ← Port of iOS AnalyticsEngine — builds prompt context from check-ins
+src/services/insightHelpers.js      ← Shared helpers: prompt building, JSON extraction, notification
+src/services/insightGenerator.js    ← Orchestrates per-user insight generation (Claude → MongoDB → push)
 src/db/mongo.js                     ← MongoDB connection + index creation
 ```
 
@@ -107,7 +111,8 @@ See `.env.example` for format. Never commit `.env`.
 - `message_reads` — `{ uid, messageId, dismissedAt }`; indexed on `(uid, messageId)` unique — tracks per-user dismissals
 - `device_tokens` — `{ uid, fcmToken, platform, timezoneOffset, createdAt, updatedAt }`; indexed on `(uid, fcmToken)` unique + `(uid)`
 - `notification_log` — `{ type, title, body, recipientUid?, recipientCount, sentCount, failedCount, triggeredBy, createdAt }`; indexed on `(createdAt)` + `(recipientUid, createdAt)` for daily cap tracking
-- `ai_guidance`, `ai_insights` — logging only
+- `ai_insights` — `{ uid, insights: [{text, patternType, confidence}], source, generatedAt }`; indexed on `(uid, generatedAt)` — stores server-generated insight batches
+- `ai_guidance` — logging only
 
 ## AI Demographic Context
 
@@ -118,12 +123,12 @@ See `.env.example` for format. Never commit `.env`.
 Backend sends push notifications via Firebase Cloud Messaging (FCM) using the existing Firebase Admin SDK — no extra env vars needed.
 
 **Automatic notifications:**
-- **Check-in reminders** — cron scheduler runs every 30 min, evaluates each user's `notificationSettings.checkInReminderFrequency`:
+- **Check-in reminders** — cron runs every 30 min, evaluates each user's `notificationSettings.checkInReminderFrequency`:
   - `often`: 2x/day (9am, 6pm user-local time), only if no check-in in 5 hours
   - `infrequent`: 1x/day (12pm), only if no check-in today
   - `never`: none
-- **Insight notifications** — triggered from `/ai/insights` after new insights are generated, respects `notificationSettings.insightsFrequency`:
-  - `often`: every time; `infrequent`: max 1/week; `never`: none
+- **Insight generation + notifications** — cron scheduler runs every 15 min, generates insights via Claude for eligible users, stores in `ai_insights`, then sends push notification. Uses deterministic per-user randomization (SHA-256 seeded) to pick 2 daily time slots between (wake time + 1hr) and (bedtime − 1hr). Respects `notificationSettings.insightsFrequency`:
+  - `often`: 2x/day; `infrequent`: 1x/day; `never`: none
 - **Quiet hours:** 10pm–8am user-local time
 - **Daily cap:** Max 3 per user per day across all types
 

@@ -35,6 +35,7 @@ index.js  →  connectDB() (MongoDB)  →  app.listen()  →  startScheduler()
 | PATCH | `/users/me` | Yes | Update profile |
 | POST | `/ai/guidance` | Yes | Claude guidance for a phase (rate-limited: 30/hr) |
 | POST | `/ai/insights` | Yes | Claude weekly insights (rate-limited: 10/hr, triggers push notification) |
+| GET | `/ai/insights` | Yes | Fetch server-generated insights (`?limit=N&since=ISO`) |
 | GET | `/messages` | Yes | Fetch unread active broadcast messages for user |
 | POST | `/messages/:id/dismiss` | Yes | Mark broadcast message dismissed |
 | PUT | `/devices/token` | Yes | Register/update FCM device token |
@@ -73,7 +74,10 @@ src/routes/admin/notifications.js   ← push notification admin endpoints
 src/services/firebase.js            ← Firebase Admin SDK init
 src/services/anthropic.js           ← Claude API wrapper
 src/services/fcm.js                 ← FCM notification sending
-src/services/scheduler.js           ← Cron scheduler for check-in reminders
+src/services/scheduler.js           ← Cron scheduler for check-in reminders + insight generation
+src/services/analyticsEngine.js     ← Port of iOS AnalyticsEngine — builds prompt context from check-ins
+src/services/insightHelpers.js      ← Shared helpers: prompt building, JSON extraction, notification
+src/services/insightGenerator.js    ← Orchestrates per-user insight generation (Claude → MongoDB → push)
 src/db/mongo.js                     ← MongoDB connection + index creation
 ```
 
@@ -103,14 +107,15 @@ See `.env.example` for format. Never commit `.env`.
 - `message_reads` — indexed on `(uid, messageId)` unique
 - `device_tokens` — indexed on `(uid, fcmToken)` unique + `(uid)` — stores FCM tokens with timezone info
 - `notification_log` — indexed on `(createdAt)` + `(recipientUid, createdAt)` — tracks all sent notifications for analytics and daily cap
-- `ai_guidance`, `ai_insights` — logging only
+- `ai_insights` — `{ uid, insights: [{text, patternType, confidence}], source, generatedAt }` — indexed on `(uid, generatedAt)` — stores server-generated insight batches
+- `ai_guidance` — logging only
 
 ## Push Notifications (FCM)
 
 Backend sends push notifications via Firebase Cloud Messaging using the existing Firebase Admin SDK.
 
-- **Check-in reminders:** Cron scheduler (every 30 min) evaluates users based on `notificationSettings.checkInReminderFrequency` (often/infrequent/never), timezone, quiet hours (10pm–8am), and daily cap (3/day)
-- **Insight notifications:** Triggered from `/ai/insights` endpoint, respects `insightsFrequency` preference
+- **Check-in reminders:** Cron (every 30 min) evaluates users based on `notificationSettings.checkInReminderFrequency` (often/infrequent/never), timezone, quiet hours (10pm–8am), and daily cap (3/day)
+- **Insight generation + notifications:** Cron (every 15 min) generates insights via Claude for eligible users using deterministic per-user time slots (SHA-256 seeded), stores in `ai_insights`, sends push notification. Respects `insightsFrequency` (often=2/day, infrequent=1/day, never=skip)
 - **Admin manual:** `POST /admin/notifications/send` to push to all or targeted users
 - **Device tokens:** Registered via `PUT /devices/token`, unregistered via `DELETE /devices/token`; stale tokens auto-cleaned
 

@@ -1,6 +1,8 @@
+const crypto = require('crypto');
 const cron = require('node-cron');
 const { getDB } = require('../db/mongo');
 const { sendToUser, logNotification } = require('./fcm');
+const { generateInsightsForUser } = require('./insightGenerator');
 
 // ─── Notification Scheduler ──────────────────────────────────────────────────
 // Sends check-in reminders based on each user's notification preferences.
@@ -15,8 +17,12 @@ const { sendToUser, logNotification } = require('./fcm');
 // Quiet hours: 10pm – 8am (user-local time) — no notifications sent.
 // Daily cap: max 3 notifications per user per day (across all types).
 //
-// The scheduler runs every 30 minutes and evaluates each user individually
-// using their stored timezone offset.
+// The check-in reminder scheduler runs every 30 minutes and evaluates each
+// user individually using their stored timezone offset.
+//
+// ─── Insight Scheduler ──────────────────────────────────────────────────────
+// Generates AI insights for eligible users twice a day at random times
+// between (wakeTime + 1hr) and (bedtime - 1hr).  Runs every 15 minutes.
 
 const REMINDER_MESSAGES = [
   { title: 'How are you feeling?', body: 'Take a moment to check in with your energy, focus, and wellbeing.' },
@@ -38,6 +44,13 @@ function getUserLocalHour(timezoneOffset) {
   const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
   const localMs = utcMs + (timezoneOffset || 0) * 60000;
   return new Date(localMs).getHours();
+}
+
+function getUserLocalDate(timezoneOffset) {
+  const now = new Date();
+  const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
+  const localMs = utcMs + (timezoneOffset || 0) * 60000;
+  return new Date(localMs);
 }
 
 function isQuietHour(localHour) {
@@ -168,13 +181,190 @@ async function processCheckInReminders() {
   }
 }
 
+// ─── Insight Scheduling ─────────────────────────────────────────────────────
+
+/**
+ * Deterministic per-user per-day random number generator.
+ * Uses uid + date as seed so every cron tick computes the same slots.
+ */
+function seededRandom(uid, dateStr, slotIndex) {
+  const hash = crypto.createHash('sha256')
+    .update(`${uid}:${dateStr}:${slotIndex}`)
+    .digest();
+  // Use first 4 bytes as a uint32 → [0, 1) float
+  return hash.readUInt32BE(0) / 0xFFFFFFFF;
+}
+
+/**
+ * Compute the two insight generation slot times for a user on a given day.
+ * Returns [slot1MinuteOfDay, slot2MinuteOfDay].
+ */
+function computeInsightSlots(uid, dateStr, sleepSchedule, localWeekday) {
+  // Extract wake/bed times from the sleep schedule
+  // sleepSchedule.entries is an array of { weekday, wakeTime, bedtime }
+  // weekday: 1=Sun, 2=Mon, ... 7=Sat  (iOS Calendar.component(.weekday))
+  let wakeMinutes = 8 * 60;  // default 8am
+  let bedMinutes = 22 * 60;  // default 10pm
+
+  if (sleepSchedule?.entries) {
+    const entry = sleepSchedule.entries.find(e => e.weekday === localWeekday);
+    if (entry) {
+      if (entry.wakeTime) {
+        const w = new Date(entry.wakeTime);
+        if (!isNaN(w.getTime())) {
+          wakeMinutes = w.getHours() * 60 + w.getMinutes();
+        }
+      }
+      if (entry.bedtime) {
+        const b = new Date(entry.bedtime);
+        if (!isNaN(b.getTime())) {
+          bedMinutes = b.getHours() * 60 + b.getMinutes();
+        }
+      }
+    }
+  }
+
+  // Window: wakeTime + 1hr  to  bedtime - 1hr
+  let earliest = wakeMinutes + 60;
+  let latest = bedMinutes - 60;
+
+  // Fallback if window too small (< 4 hours)
+  if (latest - earliest < 240) {
+    earliest = 8 * 60;
+    latest = 21 * 60;
+  }
+
+  const midpoint = Math.floor((earliest + latest) / 2);
+
+  // Slot 1: random in first half, Slot 2: random in second half
+  const r1 = seededRandom(uid, dateStr, 0);
+  const r2 = seededRandom(uid, dateStr, 1);
+
+  const slot1 = earliest + Math.floor(r1 * (midpoint - earliest));
+  const slot2 = midpoint + Math.floor(r2 * (latest - midpoint));
+
+  return [slot1, slot2];
+}
+
+/**
+ * Convert iOS weekday (1=Sun) to JS Date.getDay() (0=Sun) and back.
+ * iOS Calendar.component(.weekday): 1=Sunday, 2=Monday, ...7=Saturday
+ * JS Date.getDay(): 0=Sunday, 1=Monday, ...6=Saturday
+ */
+function jsWeekdayToIOS(jsDay) {
+  return jsDay + 1; // 0→1, 1→2, ...6→7
+}
+
+async function processScheduledInsights() {
+  try {
+    const db = getDB();
+
+    // Find eligible users: onboarding complete, have device tokens
+    const users = await db.collection('users').find({
+      onboardingComplete: true,
+    }).toArray();
+
+    if (!users.length) return;
+
+    // Get timezone info from device tokens
+    const uids = users.map(u => u.uid);
+    const deviceTokens = await db.collection('device_tokens')
+      .find({ uid: { $in: uids } })
+      .toArray();
+
+    const tzByUid = {};
+    const uidsWithTokens = new Set();
+    for (const dt of deviceTokens) {
+      uidsWithTokens.add(dt.uid);
+      if (dt.timezoneOffset != null) {
+        tzByUid[dt.uid] = dt.timezoneOffset;
+      }
+    }
+
+    let generatedCount = 0;
+
+    for (const user of users) {
+      // Skip users without device tokens
+      if (!uidsWithTokens.has(user.uid)) continue;
+
+      // Respect notification preferences
+      const freq = user.notificationSettings?.insightsFrequency;
+      if (freq === 'never') continue;
+
+      const tz = tzByUid[user.uid] ?? 0;
+      const localDate = getUserLocalDate(tz);
+      const localHour = localDate.getHours();
+
+      // Quiet hours
+      if (isQuietHour(localHour)) continue;
+
+      const localDateStr = localDate.toISOString().slice(0, 10);
+      const localWeekday = jsWeekdayToIOS(localDate.getDay());
+      const localMinuteOfDay = localDate.getHours() * 60 + localDate.getMinutes();
+
+      // Compute today's slots
+      const [slot1, slot2] = computeInsightSlots(
+        user.uid, localDateStr, user.sleepSchedule, localWeekday
+      );
+
+      // Check how many insights we've already generated today for this user
+      const todayStart = new Date(localDate);
+      todayStart.setHours(0, 0, 0, 0);
+      // Convert local todayStart back to UTC for querying
+      const todayStartUTC = new Date(todayStart.getTime() - tz * 60000);
+
+      const todayInsightCount = await db.collection('ai_insights').countDocuments({
+        uid: user.uid,
+        source: 'cron',
+        generatedAt: { $gte: todayStartUTC },
+      });
+
+      // For "infrequent": max 1 per day
+      const maxPerDay = freq === 'infrequent' ? 1 : 2;
+      if (todayInsightCount >= maxPerDay) continue;
+
+      // Check if we've passed the next eligible slot
+      let shouldGenerate = false;
+      if (todayInsightCount === 0 && localMinuteOfDay >= slot1) {
+        shouldGenerate = true;
+      } else if (todayInsightCount === 1 && localMinuteOfDay >= slot2 && maxPerDay >= 2) {
+        shouldGenerate = true;
+      }
+
+      if (!shouldGenerate) continue;
+
+      // Generate insights for this user
+      try {
+        const success = await generateInsightsForUser(user.uid);
+        if (success) {
+          generatedCount++;
+          console.log(`[Scheduler] Generated insights for user ${user.uid.substring(0, 8)}…`);
+        }
+      } catch (err) {
+        console.error(`[Scheduler] Insight generation failed for ${user.uid.substring(0, 8)}…:`, err.message);
+      }
+    }
+
+    if (generatedCount > 0) {
+      console.log(`[Scheduler] Generated insights for ${generatedCount} users`);
+    }
+  } catch (err) {
+    console.error('[Scheduler] Insight scheduling error:', err);
+  }
+}
+
 function startScheduler() {
-  // Run every 30 minutes
+  // Check-in reminders: every 30 minutes
   cron.schedule('*/30 * * * *', () => {
     processCheckInReminders();
   });
 
-  console.log('Notification scheduler started (every 30 min)');
+  // Insight generation: every 15 minutes
+  cron.schedule('*/15 * * * *', () => {
+    processScheduledInsights();
+  });
+
+  console.log('Notification scheduler started (reminders every 30 min, insights every 15 min)');
 }
 
-module.exports = { startScheduler, processCheckInReminders };
+module.exports = { startScheduler, processCheckInReminders, processScheduledInsights };
