@@ -49,10 +49,11 @@ What makes a great insight:
 - SPECIFIC: Reference actual days, phases, or note themes from their data — but translate the numbers into meaning
 
 What to avoid:
-- Never quote raw scores, averages, composites, or deltas (e.g., "3.8/5", "+0.6", "composite 4.1")
+- Don't lead with or focus on raw numbers — an occasional reference is fine for context (e.g., "your energy tends to dip in the evenings"), but the insight should be about what it MEANS, not what the score IS
+- Never reference internal terms like "composite", "delta", or "/5 scale"
 - Never say "your data shows" or "based on your check-ins"
 - Never give generic wellness advice that isn't grounded in their specific patterns
-- Don't describe the data — interpret it and suggest something useful
+- Don't just describe what happened — interpret it and suggest something useful
 
 Use "trend" for directional changes over time, "correlation" for linked patterns (activities, phases, days), and "anomaly" for notable deviations worth paying attention to.
 Confidence must reflect how clearly the data supports the claim.

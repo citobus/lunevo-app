@@ -134,7 +134,7 @@ router.post('/insights', insightsLimit, async (req, res) => {
 router.get('/insights', async (req, res) => {
     try {
         const db = getDB();
-        const limit = Math.min(parseInt(req.query.limit, 10) || 20, 50);
+        const limit = Math.min(parseInt(req.query.limit, 10) || 2, 10);
         const since = req.query.since ? new Date(req.query.since) : null;
 
         const query = { uid: req.user.uid };
