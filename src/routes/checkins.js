@@ -1,8 +1,15 @@
 const express = require('express');
 const { requireAuth } = require('../middleware/auth');
+const { rateLimit } = require('../middleware/rateLimit');
 const { getDB } = require('../db/mongo');
 
 const router = express.Router();
+const CHECKINS_BULK_RATE_LIMIT = parseInt(process.env.CHECKINS_BULK_RATE_LIMIT, 10) || 60;
+const bulkCheckinsLimit = rateLimit({
+  windowMs: 3_600_000,
+  max: CHECKINS_BULK_RATE_LIMIT,
+  key: 'checkins:bulk',
+});
 
 // All routes below require a valid Firebase token
 router.use(requireAuth);
@@ -83,7 +90,7 @@ router.put('/', async (req, res) => {
 // Bulk upserts check-ins by uid + clientId.
 // Body: { checkins: [{ clientId, timestamp, phase, energy, focus, wellbeing, note?, updatedAt? }] }
 // Returns { upsertedCount, modifiedCount }
-router.post('/bulk', async (req, res) => {
+router.post('/bulk', bulkCheckinsLimit, async (req, res) => {
   try {
     const db = getDB();
     const { checkins } = req.body;

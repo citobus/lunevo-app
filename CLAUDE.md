@@ -29,7 +29,7 @@ index.js  →  connectDB() (MongoDB)  →  app.listen()  →  startScheduler()
 | GET | `/health` | No | Liveness check → `{ status: "ok" }` |
 | GET | `/checkins` | Yes | Fetch user's check-ins (paginated) |
 | PUT | `/checkins` | Yes | Upsert by `clientId` (idempotent) |
-| POST | `/checkins/bulk` | Yes | Bulk upsert up to 1000 |
+| POST | `/checkins/bulk` | Yes | Bulk upsert up to 1000 (rate-limited: 60/hr per user by default) |
 | DELETE | `/checkins/by-client-id/:clientId` | Yes | Delete by UUID |
 | GET | `/users/me` | Yes | Fetch or auto-create profile |
 | PATCH | `/users/me` | Yes | Update profile |
@@ -57,7 +57,8 @@ Every protected route uses `src/middleware/auth.js`:
 - All DB queries must be scoped by `req.user.uid`
 
 Admin routes additionally use `src/middleware/adminAuth.js`:
-- Same token verification, then checks decoded email against `ADMIN_EMAILS` env var (comma-separated)
+- Same token verification, then requires `decoded.email_verified === true`
+- Checks decoded email against `ADMIN_EMAILS` env var (comma-separated)
 - Returns 403 if email not in list
 
 ## Key Files
@@ -98,6 +99,7 @@ src/db/mongo.js                     ← MongoDB connection + index creation
 | `DEFAULT_CLAUDE_MODEL` | No | Default: `claude-haiku-4-5-20251001` |
 | `INSIGHT_CLAUDE_MODEL` | No | Default: `claude-haiku-4-5-20251001` (NOT Sonnet — both endpoints default to Haiku) |
 | `ADMIN_EMAILS` | Yes (for admin portal) | Comma-separated Google account emails with admin access |
+| `CHECKINS_BULK_RATE_LIMIT` | No | Max bulk sync requests per user per hour (default: 60) |
 | `AI_GUIDANCE_RATE_LIMIT` | No | Max guidance requests per user per hour (default: 30) |
 | `AI_INSIGHTS_RATE_LIMIT` | No | Max insights requests per user per hour (default: 10) |
 

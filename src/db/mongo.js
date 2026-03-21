@@ -86,6 +86,18 @@ async function ensureIndexes(database) {
       { name: 'ai_insights_uid_generatedAt' }
     );
 
+    // Saved insights: one bookmark per insight per user.
+    await database.collection('saved_insights').createIndex(
+      { uid: 1, insightId: 1 },
+      { unique: true, name: 'saved_insights_uid_insightId_unique' }
+    );
+
+    // Saved insights: fast lookup by uid for fetching all bookmarks.
+    await database.collection('saved_insights').createIndex(
+      { uid: 1, savedAt: -1 },
+      { name: 'saved_insights_uid_savedAt' }
+    );
+
     console.log('MongoDB indexes ensured');
   } catch (err) {
     console.error('Failed to ensure indexes (non-fatal):', err.message);

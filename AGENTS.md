@@ -29,7 +29,7 @@ index.js  →  connectDB() (MongoDB)  →  app.listen()  →  startScheduler()
 | GET | `/health` | No | Liveness check → `{ status: "ok" }` |
 | GET | `/checkins` | Yes | Fetch user's check-ins (paginated) |
 | PUT | `/checkins` | Yes | Upsert by `clientId` (idempotent) |
-| POST | `/checkins/bulk` | Yes | Bulk upsert up to 1000 |
+| POST | `/checkins/bulk` | Yes | Bulk upsert up to 1000 (rate-limited: 60/hr per user by default) |
 | DELETE | `/checkins/by-client-id/:clientId` | Yes | Delete by UUID |
 | GET | `/users/me` | Yes | Fetch or auto-create profile |
 | PATCH | `/users/me` | Yes | Update profile |
@@ -55,6 +55,8 @@ Every protected route uses `src/middleware/auth.js`:
 - Verifies with Firebase Admin SDK
 - Attaches `req.user` (`{ uid, email, name }`)
 - All DB queries must be scoped by `req.user.uid`
+
+Admin routes additionally require `src/middleware/adminAuth.js` to verify the Firebase token again, require `decoded.email_verified === true`, and match the normalized email against `ADMIN_EMAILS`.
 
 ## Key Files
 
@@ -94,6 +96,7 @@ src/db/mongo.js                     ← MongoDB connection + index creation
 | `DEFAULT_CLAUDE_MODEL` | No | Default: `claude-haiku-4-5-20251001` |
 | `INSIGHT_CLAUDE_MODEL` | No | Default: `claude-haiku-4-5-20251001` (NOT Sonnet — both endpoints default to Haiku) |
 | `ADMIN_EMAILS` | Yes (for admin portal) | Comma-separated Google account emails with admin access |
+| `CHECKINS_BULK_RATE_LIMIT` | No | Max bulk sync requests per user per hour (default: 60) |
 | `AI_GUIDANCE_RATE_LIMIT` | No | Max guidance requests per user per hour (default: 30) |
 | `AI_INSIGHTS_RATE_LIMIT` | No | Max insights requests per user per hour (default: 10) |
 

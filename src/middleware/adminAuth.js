@@ -5,7 +5,8 @@ const admin = require('../services/firebase');
  *
  * Requires:
  *   1. A valid Firebase ID token in the Authorization: Bearer header.
- *   2. The decoded token's email must be in the ADMIN_EMAILS env var
+ *   2. The decoded token must include a verified email address.
+ *   3. That email must be in the ADMIN_EMAILS env var
  *      (comma-separated list, e.g. "you@example.com,partner@example.com").
  *
  * On success attaches `req.admin = { uid, email, name }`.
@@ -28,7 +29,7 @@ async function requireAdmin(req, res, next) {
   }
 
   const email = decoded.email;
-  if (!email) {
+  if (!email || decoded.email_verified !== true) {
     return res.status(403).json({ error: 'Admin access requires a verified email address' });
   }
 

@@ -59,4 +59,71 @@ router.patch('/me', async (req, res) => {
   }
 });
 
+// ─── GET /users/me/saved-insights ─────────────────────────────────────────────
+// Returns the user's saved insights, newest first.
+router.get('/me/saved-insights', async (req, res) => {
+  try {
+    const db = getDB();
+    const docs = await db.collection('saved_insights')
+      .find({ uid: req.user.uid })
+      .sort({ savedAt: -1 })
+      .toArray();
+
+    const insights = docs.map(({ uid, _id, ...rest }) => rest);
+    res.json({ insights });
+  } catch (err) {
+    console.error('GET /users/me/saved-insights error:', err);
+    res.status(500).json({ error: 'Failed to fetch saved insights' });
+  }
+});
+
+// ─── PUT /users/me/saved-insights/:insightId ──────────────────────────────────
+// Save (bookmark) an insight. Idempotent — re-saving the same insight is a no-op.
+router.put('/me/saved-insights/:insightId', async (req, res) => {
+  try {
+    const db = getDB();
+    const { insightId } = req.params;
+    const { text, patternType, confidence, generatedAt, source } = req.body;
+
+    await db.collection('saved_insights').updateOne(
+      { uid: req.user.uid, insightId },
+      {
+        $setOnInsert: {
+          uid: req.user.uid,
+          insightId,
+          text,
+          patternType,
+          confidence,
+          generatedAt: generatedAt ? new Date(generatedAt) : new Date(),
+          source: source || 'claude',
+          savedAt: new Date(),
+        },
+      },
+      { upsert: true }
+    );
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('PUT /users/me/saved-insights error:', err);
+    res.status(500).json({ error: 'Failed to save insight' });
+  }
+});
+
+// ─── DELETE /users/me/saved-insights/:insightId ───────────────────────────────
+// Unsave (un-bookmark) an insight.
+router.delete('/me/saved-insights/:insightId', async (req, res) => {
+  try {
+    const db = getDB();
+    await db.collection('saved_insights').deleteOne({
+      uid: req.user.uid,
+      insightId: req.params.insightId,
+    });
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('DELETE /users/me/saved-insights error:', err);
+    res.status(500).json({ error: 'Failed to unsave insight' });
+  }
+});
+
 module.exports = router;
