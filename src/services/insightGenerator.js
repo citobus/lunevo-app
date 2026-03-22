@@ -1,6 +1,6 @@
 const { sendMessage } = require('./anthropic');
 const { getDB } = require('../db/mongo');
-const { generateSnapshotContext, hasEnoughData } = require('./analyticsEngine');
+const { generateSnapshotContext, hasEnoughData, hasRecentCheckIn } = require('./analyticsEngine');
 const {
   computeAge,
   buildInsightsPrompt,
@@ -17,15 +17,19 @@ const DEFAULT_INSIGHT_MODEL = process.env.INSIGHT_CLAUDE_MODEL || 'claude-haiku-
 async function generateInsightsForUser(uid) {
   const db = getDB();
 
-  // 1. Check data eligibility
+  // 1. Require a recent check-in so stale accounts stop receiving fresh insights.
+  const hasRecentActivity = await hasRecentCheckIn(uid);
+  if (!hasRecentActivity) return false;
+
+  // 2. Check data eligibility
   const eligible = await hasEnoughData(uid);
   if (!eligible) return false;
 
-  // 2. Build analytics context
+  // 3. Build analytics context
   const context = await generateSnapshotContext(uid);
   if (!context) return false;
 
-  // 3. Fetch user profile for personalisation
+  // 4. Fetch user profile for personalisation
   const user = await db.collection('users').findOne(
     { uid },
     { projection: { firstName: 1, dateOfBirth: 1, gender: 1 } }
@@ -34,7 +38,7 @@ async function generateInsightsForUser(uid) {
   const userAge = computeAge(user?.dateOfBirth);
   const userGender = user?.gender || null;
 
-  // 4. Append previous insights to avoid repetition
+  // 5. Append previous insights to avoid repetition
   const prevDocs = await db.collection('ai_insights')
     .find({ uid })
     .sort({ generatedAt: -1 })
@@ -50,7 +54,7 @@ async function generateInsightsForUser(uid) {
     }
   }
 
-  // 5. Call Claude
+  // 6. Call Claude
   const prompt = buildInsightsPrompt({ context: fullContext, firstName, userAge, userGender });
   const rawText = await sendMessage({
     systemPrompt: prompt.systemPrompt,
@@ -61,7 +65,7 @@ async function generateInsightsForUser(uid) {
   });
   const insights = extractJSONArray(rawText);
 
-  // 6. Store in ai_insights
+  // 7. Store in ai_insights
   await db.collection('ai_insights').insertOne({
     uid,
     insights,
@@ -70,7 +74,7 @@ async function generateInsightsForUser(uid) {
     source: 'cron',
   });
 
-  // 7. Send push notification (non-blocking)
+  // 8. Send push notification (non-blocking)
   notifyInsightsAvailable(uid, db).catch(() => {});
 
   return true;

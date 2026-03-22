@@ -3,6 +3,7 @@ const { requireAuth } = require('../middleware/auth');
 const { rateLimit } = require('../middleware/rateLimit');
 const { sendMessage } = require('../services/anthropic');
 const { getDB } = require('../db/mongo');
+const { hasRecentCheckIn } = require('../services/analyticsEngine');
 const {
   sanitizeName,
   computeAge,
@@ -92,6 +93,16 @@ router.post('/insights', insightsLimit, async (req, res) => {
 
         if (!context) {
             return res.status(400).json({ error: 'Missing required field: context' });
+        }
+
+        const hasRecentActivity = await hasRecentCheckIn(req.user.uid);
+        if (!hasRecentActivity) {
+            return res.json({
+                insights: [],
+                source: 'recent_checkin_required',
+                skipped: true,
+                message: 'Insights require a check-in within the last 24 hours.',
+            });
         }
 
         const db = getDB();

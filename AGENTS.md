@@ -118,7 +118,7 @@ See `.env.example` for format. Never commit `.env`.
 Backend sends push notifications via Firebase Cloud Messaging using the existing Firebase Admin SDK.
 
 - **Check-in reminders:** Cron (every 30 min) evaluates users based on `notificationSettings.checkInReminderFrequency` (often/infrequent/never), timezone, quiet hours (10pm–8am), and daily cap (3/day)
-- **Insight generation + notifications:** Cron (every 15 min) generates insights via Claude for eligible users using deterministic per-user time slots (SHA-256 seeded), stores in `ai_insights`, sends push notification. Respects `insightsFrequency` (often=2/day, infrequent=1/day, never=skip)
+- **Insight generation + notifications:** Cron (every 15 min) generates insights via Claude for eligible users using deterministic per-user time slots (SHA-256 seeded), stores in `ai_insights`, sends push notification. Respects `insightsFrequency` (often=2/day, infrequent=1/day, never=skip) and now skips users whose latest check-in is older than 24 hours. The direct `POST /ai/insights` route applies the same recent-check-in requirement and returns an empty `insights` array instead of generating new output when the user is inactive.
 - **Admin manual:** `POST /admin/notifications/send` to push to all or targeted users
 - **Device tokens:** Registered via `PUT /devices/token`, unregistered via `DELETE /devices/token`; stale tokens auto-cleaned
 

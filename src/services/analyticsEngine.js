@@ -1,5 +1,7 @@
 const { getDB } = require('../db/mongo');
 
+const RECENT_CHECKIN_WINDOW_MS = 24 * 60 * 60 * 1000;
+
 // ─── Analytics Engine ───────────────────────────────────────────────────────
 // Port of the iOS AnalyticsEngine.swift — builds the same prompt context text
 // that Claude expects for insight generation.  Reads check-ins from MongoDB.
@@ -162,6 +164,22 @@ async function hasEnoughData(uid) {
   if (!earliest) return false;
 
   return (Date.now() - new Date(earliest.timestamp).getTime()) >= 86400000;
+}
+
+async function getLastCheckInTime(uid) {
+  const db = getDB();
+
+  const latest = await db.collection('checkins')
+    .findOne({ uid }, { sort: { timestamp: -1 }, projection: { timestamp: 1 } });
+
+  return latest?.timestamp || null;
+}
+
+async function hasRecentCheckIn(uid, maxAgeMs = RECENT_CHECKIN_WINDOW_MS) {
+  const lastCheckIn = await getLastCheckInTime(uid);
+  if (!lastCheckIn) return false;
+
+  return (Date.now() - new Date(lastCheckIn).getTime()) <= maxAgeMs;
 }
 
 // ─── Phase Summaries ────────────────────────────────────────────────────────
@@ -462,4 +480,10 @@ function buildPromptContext({
   return lines.join('\n');
 }
 
-module.exports = { generateSnapshotContext, hasEnoughData };
+module.exports = {
+  RECENT_CHECKIN_WINDOW_MS,
+  generateSnapshotContext,
+  getLastCheckInTime,
+  hasEnoughData,
+  hasRecentCheckIn,
+};

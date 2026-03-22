@@ -131,6 +131,8 @@ Backend sends push notifications via Firebase Cloud Messaging (FCM) using the ex
   - `never`: none
 - **Insight generation + notifications** — cron scheduler runs every 15 min, generates insights via Claude for eligible users, stores in `ai_insights`, then sends push notification. Uses deterministic per-user randomization (SHA-256 seeded) to pick 2 daily time slots between (wake time + 1hr) and (bedtime − 1hr). Respects `notificationSettings.insightsFrequency`:
   - `often`: 2x/day; `infrequent`: 1x/day; `never`: none
+  - Requires a check-in within the last 24 hours; inactive users are skipped
+  - `POST /ai/insights` enforces the same 24-hour recent-check-in rule and returns an empty `insights` array when generation is skipped
 - **Quiet hours:** 10pm–8am user-local time
 - **Daily cap:** Max 3 per user per day across all types
 
