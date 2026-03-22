@@ -50,6 +50,11 @@ index.js  →  connectDB() (MongoDB)  →  app.listen()  →  startScheduler()
 | POST | `/admin/notifications/send` | Admin | Send push notification to all/targeted users |
 | GET | `/admin/notifications/log` | Admin | Recent notification log entries |
 | GET | `/admin/notifications/stats` | Admin | Device/user notification stats |
+| GET | `/admin/users/stats` | Admin | Rollup usage/subscription/account stats |
+| GET | `/admin/users` | Admin | Searchable user list with usage summaries |
+| GET | `/admin/users/:uid` | Admin | Per-user account + API usage detail |
+| PATCH | `/admin/users/:uid` | Admin | Update account, notification, subscription, disabled state |
+| DELETE | `/admin/users/:uid` | Admin | Permanently delete user account + related data |
 
 ## Auth Pattern
 
@@ -70,6 +75,7 @@ index.js                            ← start server + scheduler
 src/app.js                          ← Express setup + route mounting + CORS
 src/middleware/auth.js              ← Firebase token verification
 src/middleware/adminAuth.js         ← Admin email allowlist check
+src/middleware/trackUsage.js        ← Persists per-request API usage events + user activity counters
 src/middleware/rateLimit.js         ← Per-user sliding window rate limiter (in-memory)
 src/routes/checkins.js              ← check-in CRUD + bulk sync
 src/routes/users.js                 ← user profile
@@ -80,6 +86,7 @@ src/routes/subscriptions.js         ← StoreKit 2 subscription verification + s
 src/middleware/requireSubscription.js ← Middleware to enforce active subscription on AI routes
 src/routes/admin/messages.js        ← broadcast messages CRUD (admin only)
 src/routes/admin/notifications.js   ← push notification admin endpoints
+src/routes/admin/users.js           ← admin user management + usage analytics endpoints
 src/services/firebase.js            ← Firebase Admin SDK init
 src/services/anthropic.js           ← Claude API wrapper
 src/services/fcm.js                 ← FCM notification sending
@@ -119,6 +126,7 @@ See `.env.example` for format. Never commit `.env`.
 - `notification_log` — indexed on `(createdAt)` + `(recipientUid, createdAt)` — tracks all sent notifications for analytics and daily cap
 - `ai_insights` — `{ uid, insights: [{text, patternType, confidence}], source, generatedAt }` — indexed on `(uid, generatedAt)` — stores server-generated insight batches
 - `ai_guidance` — logging only
+- `api_usage_events` — `{ uid, method, route, resource, statusCode, durationMs, createdAt, ... }` — indexed on `(uid, createdAt)`, `(createdAt)`, `(route, createdAt)` for admin usage analytics
 
 ## Push Notifications (FCM)
 
@@ -128,6 +136,7 @@ Production iOS delivery is fully configured through Firebase, including the APNs
 - **Check-in reminders:** Cron (every 30 min) evaluates users based on `notificationSettings.checkInReminderFrequency` (often/infrequent/never), timezone, quiet hours (10pm–8am), and daily cap (3/day)
 - **Insight generation + notifications:** Cron (every 15 min) generates insights via Claude for eligible users using deterministic per-user time slots (SHA-256 seeded), stores in `ai_insights`, sends push notification. Respects `insightsFrequency` (often=2/day, infrequent=1/day, never=skip) and now skips users whose latest check-in is older than 24 hours. The direct `POST /ai/insights` route applies the same recent-check-in requirement and returns an empty `insights` array instead of generating new output when the user is inactive.
 - **Admin manual:** `POST /admin/notifications/send` to push to all or targeted users
+- **Admin user management:** `/admin/users*` endpoints power account edits, subscription overrides, per-user request analytics, disable, and permanent deletion
 - **Device tokens:** Registered via `PUT /devices/token`, unregistered via `DELETE /devices/token`; stale tokens auto-cleaned
 
 ## Railway Deployment

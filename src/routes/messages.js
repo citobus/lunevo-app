@@ -1,12 +1,14 @@
 const express = require('express');
 const { ObjectId } = require('mongodb');
 const { requireAuth } = require('../middleware/auth');
+const { trackUsage } = require('../middleware/trackUsage');
 const { getDB } = require('../db/mongo');
 
 const router = express.Router();
 
 // All routes require a valid Firebase user token
 router.use(requireAuth);
+router.use(trackUsage('messages'));
 
 // ─── GET /messages ───────────────────────────────────────────────────────────
 // Returns broadcast messages that are currently active (published, past their

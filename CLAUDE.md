@@ -50,6 +50,11 @@ index.js  →  connectDB() (MongoDB)  →  app.listen()  →  startScheduler()
 | POST | `/admin/notifications/send` | Admin | Send push notification to all (or targeted) users |
 | GET | `/admin/notifications/log` | Admin | Recent notification log entries |
 | GET | `/admin/notifications/stats` | Admin | Device/user notification stats |
+| GET | `/admin/users/stats` | Admin | Rollup usage/subscription/account stats |
+| GET | `/admin/users` | Admin | Searchable user list with usage summaries |
+| GET | `/admin/users/:uid` | Admin | Per-user account + API usage detail |
+| PATCH | `/admin/users/:uid` | Admin | Update account, notification, subscription, disabled state |
+| DELETE | `/admin/users/:uid` | Admin | Permanently delete user account + related data |
 
 ## Auth Pattern
 
@@ -76,6 +81,7 @@ index.js                            ← start server + scheduler
 src/app.js                          ← Express setup + route mounting + CORS for lunevoapp.com
 src/middleware/auth.js              ← Firebase token verification
 src/middleware/adminAuth.js         ← Admin email allowlist check
+src/middleware/trackUsage.js        ← Persists per-request API usage events + user activity counters
 src/middleware/rateLimit.js         ← Per-user sliding window rate limiter (in-memory)
 src/routes/checkins.js              ← check-in CRUD + bulk sync
 src/routes/users.js                 ← user profile
@@ -86,6 +92,7 @@ src/routes/subscriptions.js         ← StoreKit 2 subscription verification + s
 src/middleware/requireSubscription.js ← Middleware to enforce active subscription
 src/routes/admin/messages.js        ← broadcast messages CRUD (admin only)
 src/routes/admin/notifications.js   ← push notification admin endpoints (send, log, stats)
+src/routes/admin/users.js           ← admin user management + usage analytics endpoints
 src/services/firebase.js            ← Firebase Admin SDK init
 src/services/anthropic.js           ← Claude API wrapper
 src/services/fcm.js                 ← FCM notification sending (batched, stale token cleanup)
@@ -126,6 +133,7 @@ See `.env.example` for format. Never commit `.env`.
 - `ai_insights` — `{ uid, insights: [{text, patternType, confidence}], source, generatedAt }`; indexed on `(uid, generatedAt)` — stores server-generated insight batches
 - `ai_guidance` — logging only
 - `subscriptions` — `{ uid, originalTransactionId, productId, environment, status, verifiedAt, createdAt, updatedAt }`; indexed on `(uid)` unique — stores per-user subscription state synced from iOS StoreKit 2
+- `api_usage_events` — `{ uid, method, route, resource, statusCode, durationMs, createdAt, ... }`; indexed on `(uid, createdAt)`, `(createdAt)`, `(route, createdAt)` for admin usage analytics
 
 ## AI Demographic Context
 
@@ -149,6 +157,7 @@ Production iOS delivery is fully configured through Firebase, including the APNs
 - **Daily cap:** Max 3 per user per day across all types
 
 **Manual notifications:** Admin portal `POST /admin/notifications/send` to push to all users.
+**Admin user management:** `/admin/users*` endpoints power account edits, subscription overrides, per-user request analytics, disable, and permanent deletion.
 
 **Device tokens:** iOS app registers FCM token via `PUT /devices/token` on sign-in and token refresh; unregisters via `DELETE /devices/token` on sign-out. Stale tokens auto-cleaned on send failure.
 

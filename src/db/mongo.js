@@ -104,6 +104,22 @@ async function ensureIndexes(database) {
       { unique: true, name: 'subscriptions_uid_unique' }
     );
 
+    // API usage events: recent requests by user for admin audit + analytics.
+    await database.collection('api_usage_events').createIndex(
+      { uid: 1, createdAt: -1 },
+      { name: 'api_usage_events_uid_createdAt' }
+    );
+
+    await database.collection('api_usage_events').createIndex(
+      { createdAt: -1 },
+      { name: 'api_usage_events_createdAt' }
+    );
+
+    await database.collection('api_usage_events').createIndex(
+      { route: 1, createdAt: -1 },
+      { name: 'api_usage_events_route_createdAt' }
+    );
+
     console.log('MongoDB indexes ensured');
   } catch (err) {
     console.error('Failed to ensure indexes (non-fatal):', err.message);

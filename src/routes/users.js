@@ -1,10 +1,12 @@
 const express = require('express');
 const { requireAuth } = require('../middleware/auth');
+const { trackUsage } = require('../middleware/trackUsage');
 const { getDB } = require('../db/mongo');
 
 const router = express.Router();
 
 router.use(requireAuth);
+router.use(trackUsage('users'));
 
 // ─── GET /users/me ────────────────────────────────────────────────────────────
 // Returns the user profile for the authenticated user.

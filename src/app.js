@@ -9,6 +9,7 @@ const devicesRouter = require('./routes/devices');
 const subscriptionsRouter = require('./routes/subscriptions');
 const adminMessagesRouter = require('./routes/admin/messages');
 const adminNotificationsRouter = require('./routes/admin/notifications');
+const adminUsersRouter = require('./routes/admin/users');
 
 const app = express();
 
@@ -45,6 +46,7 @@ app.use('/devices', devicesRouter);
 app.use('/subscriptions', subscriptionsRouter);
 app.use('/admin/messages', adminMessagesRouter);
 app.use('/admin/notifications', adminNotificationsRouter);
+app.use('/admin/users', adminUsersRouter);
 
 // ─── 404 ──────────────────────────────────────────────────────────────────────
 app.use((req, res) => {

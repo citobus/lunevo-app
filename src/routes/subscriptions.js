@@ -1,10 +1,12 @@
 const express = require('express');
 const { requireAuth } = require('../middleware/auth');
+const { trackUsage } = require('../middleware/trackUsage');
 const { getDB } = require('../db/mongo');
 
 const router = express.Router();
 
 router.use(requireAuth);
+router.use(trackUsage('subscriptions'));
 
 // ─── POST /subscriptions/verify ──────────────────────────────────────────────
 // Receives a StoreKit 2 transaction from the iOS app, verifies it with Apple's

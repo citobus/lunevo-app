@@ -1,5 +1,6 @@
 const express = require('express');
 const { requireAuth } = require('../middleware/auth');
+const { trackUsage } = require('../middleware/trackUsage');
 const { rateLimit } = require('../middleware/rateLimit');
 const { getDB } = require('../db/mongo');
 
@@ -13,6 +14,7 @@ const bulkCheckinsLimit = rateLimit({
 
 // All routes below require a valid Firebase token
 router.use(requireAuth);
+router.use(trackUsage('checkins'));
 
 // ─── GET /checkins ────────────────────────────────────────────────────────────
 // Returns all check-ins for the authenticated user, newest first.

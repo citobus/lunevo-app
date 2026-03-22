@@ -1,10 +1,12 @@
 const express = require('express');
 const { requireAuth } = require('../middleware/auth');
+const { trackUsage } = require('../middleware/trackUsage');
 const { getDB } = require('../db/mongo');
 
 const router = express.Router();
 
 router.use(requireAuth);
+router.use(trackUsage('devices'));
 
 // ─── PUT /devices/token ──────────────────────────────────────────────────────
 // Register or update an FCM device token for the authenticated user.
