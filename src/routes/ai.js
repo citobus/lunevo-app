@@ -1,5 +1,6 @@
 const express = require('express');
 const { requireAuth } = require('../middleware/auth');
+const { requireSubscription } = require('../middleware/requireSubscription');
 const { rateLimit } = require('../middleware/rateLimit');
 const { sendMessage } = require('../services/anthropic');
 const { getDB } = require('../db/mongo');
@@ -26,6 +27,7 @@ const guidanceLimit = rateLimit({ windowMs: 3_600_000, max: GUIDANCE_RATE_LIMIT,
 const insightsLimit = rateLimit({ windowMs: 3_600_000, max: INSIGHTS_RATE_LIMIT, key: 'ai:insights' });
 
 router.use(requireAuth);
+router.use(requireSubscription);
 
 function buildGuidancePrompt({ phase, context, firstName, userAge, userGender }) {
     const name = sanitizeName(firstName, 'there');

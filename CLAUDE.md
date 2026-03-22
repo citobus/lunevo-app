@@ -40,6 +40,9 @@ index.js  →  connectDB() (MongoDB)  →  app.listen()  →  startScheduler()
 | POST | `/messages/:id/dismiss` | Yes | Mark broadcast message dismissed (per-user, idempotent) |
 | PUT | `/devices/token` | Yes | Register/update FCM device token |
 | DELETE | `/devices/token` | Yes | Unregister FCM device token (e.g. on sign-out) |
+| POST | `/subscriptions/verify` | Yes | Store/update subscription from StoreKit 2 transaction |
+| GET | `/subscriptions/status` | Yes | Check subscription status for authenticated user |
+| POST | `/subscriptions/expire` | Yes | Mark subscription as expired |
 | GET | `/admin/messages` | Admin | List all broadcast messages |
 | POST | `/admin/messages` | Admin | Create broadcast message (`title`, `body`, optional `scheduledAt`) |
 | PATCH | `/admin/messages/:id` | Admin | Update title/body/scheduledAt/status |
@@ -61,6 +64,11 @@ Admin routes additionally use `src/middleware/adminAuth.js`:
 - Checks decoded email against `ADMIN_EMAILS` env var (comma-separated)
 - Returns 403 if email not in list
 
+AI routes (`/ai/*`) additionally use `src/middleware/requireSubscription.js`:
+- Checks the `subscriptions` collection for an active subscription record
+- Returns 403 with `{ error: 'subscription_required' }` if no active subscription
+- Fails open if the DB query errors (non-blocking)
+
 ## Key Files
 
 ```
@@ -74,6 +82,8 @@ src/routes/users.js                 ← user profile
 src/routes/ai.js                    ← Claude guidance + insights (triggers insight notifications)
 src/routes/messages.js              ← broadcast messages (user-facing)
 src/routes/devices.js               ← FCM device token registration
+src/routes/subscriptions.js         ← StoreKit 2 subscription verification + status
+src/middleware/requireSubscription.js ← Middleware to enforce active subscription
 src/routes/admin/messages.js        ← broadcast messages CRUD (admin only)
 src/routes/admin/notifications.js   ← push notification admin endpoints (send, log, stats)
 src/services/firebase.js            ← Firebase Admin SDK init
@@ -115,6 +125,7 @@ See `.env.example` for format. Never commit `.env`.
 - `notification_log` — `{ type, title, body, recipientUid?, recipientCount, sentCount, failedCount, triggeredBy, createdAt }`; indexed on `(createdAt)` + `(recipientUid, createdAt)` for daily cap tracking
 - `ai_insights` — `{ uid, insights: [{text, patternType, confidence}], source, generatedAt }`; indexed on `(uid, generatedAt)` — stores server-generated insight batches
 - `ai_guidance` — logging only
+- `subscriptions` — `{ uid, originalTransactionId, productId, environment, status, verifiedAt, createdAt, updatedAt }`; indexed on `(uid)` unique — stores per-user subscription state synced from iOS StoreKit 2
 
 ## AI Demographic Context
 
@@ -123,6 +134,7 @@ See `.env.example` for format. Never commit `.env`.
 ## Push Notifications (FCM)
 
 Backend sends push notifications via Firebase Cloud Messaging (FCM) using the existing Firebase Admin SDK — no extra env vars needed.
+Production iOS delivery is fully configured through Firebase, including the APNs key linkage required for live push notifications.
 
 **Automatic notifications:**
 - **Check-in reminders** — cron runs every 30 min, evaluates each user's `notificationSettings.checkInReminderFrequency`:

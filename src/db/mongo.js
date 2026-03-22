@@ -98,6 +98,12 @@ async function ensureIndexes(database) {
       { name: 'saved_insights_uid_savedAt' }
     );
 
+    // Subscriptions: one record per user.
+    await database.collection('subscriptions').createIndex(
+      { uid: 1 },
+      { unique: true, name: 'subscriptions_uid_unique' }
+    );
+
     console.log('MongoDB indexes ensured');
   } catch (err) {
     console.error('Failed to ensure indexes (non-fatal):', err.message);

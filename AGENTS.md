@@ -40,6 +40,9 @@ index.js  →  connectDB() (MongoDB)  →  app.listen()  →  startScheduler()
 | POST | `/messages/:id/dismiss` | Yes | Mark broadcast message dismissed |
 | PUT | `/devices/token` | Yes | Register/update FCM device token |
 | DELETE | `/devices/token` | Yes | Unregister FCM device token |
+| POST | `/subscriptions/verify` | Yes | Store/update subscription from StoreKit 2 transaction |
+| GET | `/subscriptions/status` | Yes | Check subscription status for authenticated user |
+| POST | `/subscriptions/expire` | Yes | Mark subscription as expired |
 | GET | `/admin/messages` | Admin | List all broadcast messages |
 | POST | `/admin/messages` | Admin | Create broadcast message |
 | PATCH | `/admin/messages/:id` | Admin | Update message |
@@ -58,6 +61,8 @@ Every protected route uses `src/middleware/auth.js`:
 
 Admin routes additionally require `src/middleware/adminAuth.js` to verify the Firebase token again, require `decoded.email_verified === true`, and match the normalized email against `ADMIN_EMAILS`.
 
+AI routes (`/ai/*`) additionally use `src/middleware/requireSubscription.js` to enforce an active subscription. Returns 403 `subscription_required` if no active record in the `subscriptions` collection. Fails open on DB errors.
+
 ## Key Files
 
 ```
@@ -71,6 +76,8 @@ src/routes/users.js                 ← user profile
 src/routes/ai.js                    ← Claude guidance + insights (triggers insight notifications)
 src/routes/messages.js              ← broadcast messages (user-facing)
 src/routes/devices.js               ← FCM device token registration
+src/routes/subscriptions.js         ← StoreKit 2 subscription verification + status
+src/middleware/requireSubscription.js ← Middleware to enforce active subscription on AI routes
 src/routes/admin/messages.js        ← broadcast messages CRUD (admin only)
 src/routes/admin/notifications.js   ← push notification admin endpoints
 src/services/firebase.js            ← Firebase Admin SDK init
@@ -116,6 +123,7 @@ See `.env.example` for format. Never commit `.env`.
 ## Push Notifications (FCM)
 
 Backend sends push notifications via Firebase Cloud Messaging using the existing Firebase Admin SDK.
+Production iOS delivery is fully configured through Firebase, including the APNs key linkage required for live push notifications.
 
 - **Check-in reminders:** Cron (every 30 min) evaluates users based on `notificationSettings.checkInReminderFrequency` (often/infrequent/never), timezone, quiet hours (10pm–8am), and daily cap (3/day)
 - **Insight generation + notifications:** Cron (every 15 min) generates insights via Claude for eligible users using deterministic per-user time slots (SHA-256 seeded), stores in `ai_insights`, sends push notification. Respects `insightsFrequency` (often=2/day, infrequent=1/day, never=skip) and now skips users whose latest check-in is older than 24 hours. The direct `POST /ai/insights` route applies the same recent-check-in requirement and returns an empty `insights` array instead of generating new output when the user is inactive.

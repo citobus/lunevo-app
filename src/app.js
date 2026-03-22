@@ -6,6 +6,7 @@ const usersRouter = require('./routes/users');
 const aiRouter = require('./routes/ai');
 const messagesRouter = require('./routes/messages');
 const devicesRouter = require('./routes/devices');
+const subscriptionsRouter = require('./routes/subscriptions');
 const adminMessagesRouter = require('./routes/admin/messages');
 const adminNotificationsRouter = require('./routes/admin/notifications');
 
@@ -41,6 +42,7 @@ app.use('/users', usersRouter);
 app.use('/ai', aiRouter);
 app.use('/messages', messagesRouter);
 app.use('/devices', devicesRouter);
+app.use('/subscriptions', subscriptionsRouter);
 app.use('/admin/messages', adminMessagesRouter);
 app.use('/admin/notifications', adminNotificationsRouter);
 
